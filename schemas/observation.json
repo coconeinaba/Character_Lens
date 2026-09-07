@@ -1,0 +1,71 @@
+{
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string",
+      "maxLength": 1200
+    },
+    "subject_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 100
+    },
+    "features": {
+      "type": "object",
+      "properties": {
+        "hair": {
+          "type": "string",
+          "maxLength": 1200
+        },
+        "face": {
+          "type": "string",
+          "maxLength": 1200
+        },
+        "costume": {
+          "type": "string",
+          "maxLength": 1200
+        },
+        "distinctive": {
+          "type": "string",
+          "maxLength": 1200
+        },
+        "colors": {
+          "type": "string",
+          "maxLength": 1200
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 1200
+        }
+      },
+      "required": [
+        "hair",
+        "face",
+        "costume",
+        "distinctive",
+        "colors",
+        "body"
+      ],
+      "additionalProperties": false
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 1200
+      },
+      "maxItems": 12
+    }
+  },
+  "required": [
+    "summary",
+    "subject_count",
+    "features",
+    "limitations"
+  ],
+  "additionalProperties": false
+}
+
