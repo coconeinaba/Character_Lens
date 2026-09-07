@@ -1,0 +1,140 @@
+{
+  "type": "object",
+  "properties": {
+    "identification": {
+      "type": "string",
+      "enum": [
+        "candidate",
+        "ambiguous",
+        "unknown",
+        "no_character"
+      ]
+    },
+    "overall_reason": {
+      "type": "string",
+      "maxLength": 1200
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "work": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "variant": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "rationale": {
+            "type": "string",
+            "maxLength": 1200
+          },
+          "matches": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 1200
+            },
+            "maxItems": 12
+          },
+          "differences": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 1200
+            },
+            "maxItems": 12
+          },
+          "axes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "axis": {
+                  "type": "string",
+                  "enum": [
+                    "hair",
+                    "face",
+                    "costume",
+                    "distinctive",
+                    "colors",
+                    "body"
+                  ]
+                },
+                "score": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "reason": {
+                  "type": "string",
+                  "maxLength": 1200
+                }
+              },
+              "required": [
+                "axis",
+                "score",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 6,
+            "maxItems": 6
+          },
+          "display_name": {
+            "minLength": 1,
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "work",
+          "variant",
+          "confidence",
+          "rationale",
+          "matches",
+          "differences",
+          "axes",
+          "display_name"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 3
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 1200
+      },
+      "maxItems": 12
+    }
+  },
+  "required": [
+    "identification",
+    "overall_reason",
+    "candidates",
+    "limitations"
+  ],
+  "additionalProperties": false
+}
+
