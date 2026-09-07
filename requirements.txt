@@ -1,0 +1,4 @@
+Pillow>=12.3.0,<13
+numpy>=2.3,<3
+onnxruntime>=1.29.0,<2
+
