@@ -1,0 +1,19 @@
+{
+  "repo": "SmilingWolf/wd-vit-tagger-v3",
+  "revision": "7f6b584d0bd3f55c4531f14ba3d4761b2bccdc0f",
+  "license": "Apache-2.0",
+  "files": {
+    "model.onnx": {
+      "sha256": "35f23693620b668f4d53fd3c62bf65e40af739bc52c7eb0fbc49258b58d065b6",
+      "size": 378536310
+    },
+    "selected_tags.csv": {
+      "sha256": "298633d94d0031d2081c0893f29c82eab7f0df00b08483ba8f29d1e979441217",
+      "size": 308468
+    },
+    "README.md": {
+      "sha256": "edad0e80dcbebef5ae595387ff33d410c86589ae99e115670f6abea8888bc613",
+      "size": 1766
+    }
+  }
+}
