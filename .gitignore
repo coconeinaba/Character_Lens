@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+data/
+models/wd-vit-tagger-v3/model.onnx
+migration/history.sqlite3*
