@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "python_version": "3.14.6",
+  "platform": "Windows x64",
+  "packages": [
+    {
+      "distribution": "Pillow",
+      "module": "PIL",
+      "version": "12.3.0"
+    },
+    {
+      "distribution": "numpy",
+      "module": "numpy",
+      "version": "2.5.1"
+    },
+    {
+      "distribution": "onnxruntime",
+      "module": "onnxruntime",
+      "version": "1.29.0"
+    },
+    {
+      "distribution": "flatbuffers",
+      "module": "flatbuffers",
+      "version": "25.12.19"
+    },
+    {
+      "distribution": "packaging",
+      "module": "packaging",
+      "version": "26.2"
+    },
+    {
+      "distribution": "protobuf",
+      "module": "google.protobuf",
+      "version": "7.36.1"
+    }
+  ],
+  "ollama": {
+    "model": "qwen3-vl:latest",
+    "digest": "901cae73216286ea8c5aba8b46d307ff7188f737285ec500c795a12f05225d28",
+    "size": 6140415879
+  }
+}
