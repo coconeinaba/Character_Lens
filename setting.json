@@ -1,0 +1,19 @@
+{
+  "active_profile": "このPC",
+  "ollama_profiles": [
+    {
+      "endpoint": "http://127.0.0.1:11434",
+      "name": "このPC"
+    }
+  ],
+  "schema_version": 1,
+  "weights": {
+    "body": 10,
+    "colors": 5,
+    "costume": 15,
+    "distinctive": 30,
+    "face": 20,
+    "hair": 20
+  }
+}
+
