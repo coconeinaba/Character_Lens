@@ -16,6 +16,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image
 from domain import AXES, ValidationError, build_config, contract_bundle, parse_reply, prepare_image, score_result, validate_weights
+from reference_sources import ReferenceError, normalize_profiles, validate_reference_url
 from settings import load_settings, save_settings
 from engine import BatchEngine
 from exporter import export_csv, export_html, export_json, spreadsheet_text
@@ -172,6 +173,30 @@ class DomainTests(unittest.TestCase):
             saved = save_settings({"weights": weights, "ollama_profiles": [{"name": "LAN", "endpoint": "http://192.168.1.2:11434"}], "active_profile": "LAN"}, path)
             self.assertEqual(saved["weights"], weights)
             self.assertEqual(load_settings(path)["ollama_profiles"][0]["endpoint"], "http://192.168.1.2:11434")
+
+
+class ReferenceSourceTests(unittest.TestCase):
+    def test_registered_url_validation_and_profiles(self):
+        self.assertEqual(
+            validate_reference_url("https://Example.com/characters/#top"),
+            "https://example.com/characters/",
+        )
+        with self.assertRaises(ReferenceError):
+            validate_reference_url("http://example.com/characters/")
+        with self.assertRaises(ReferenceError):
+            validate_reference_url("https://user:password@example.com/characters/")
+        with self.assertRaises(ReferenceError):
+            validate_reference_url("https://127.0.0.1/characters/")
+        with self.assertRaises(ReferenceError):
+            validate_reference_url("https://other.example/characters/", {"example.com"})
+        profiles = normalize_profiles([{
+            "name": "公式キャラクター",
+            "urls": ["https://example.com/characters/", "https://example.com/characters/#ignored"],
+        }])
+        self.assertEqual(profiles, [{
+            "name": "公式キャラクター",
+            "urls": ["https://example.com/characters/"],
+        }])
 
 
 class ImageTests(unittest.TestCase):
