@@ -1,4 +1,4 @@
-"""Character Lens: local-only character inspection. Launch this file with Python."""
+"""Character Lens: local AI character inspection with optional registered references."""
 from __future__ import annotations
 
 import argparse
