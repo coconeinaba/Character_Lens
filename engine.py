@@ -8,7 +8,7 @@ from pathlib import Path
 
 from domain import ValidationError, digest, dumps, prepare_image, score_result, now
 from ollama_client import Cancelled, OllamaClient, OllamaError
-from reference_sources import ReferenceError, collect_reference_catalog
+from reference_sources import ReferenceError, collect_reference_catalog, provenance_metadata
 
 
 class BatchEngine:
@@ -118,6 +118,7 @@ class BatchEngine:
                 if self.cancel_event.is_set():
                     break
                 run_id = None
+                prepared = None
                 started = time.monotonic()
                 try:
                     self.emit("stage", {"asset_id": asset["id"], "index": index + 1, "total": len(assets), "text": "画像を準備"})
@@ -205,7 +206,7 @@ class BatchEngine:
                     if reference_catalog is not None:
                         provenance["reference_mode"] = "registered_urls"
                         provenance["reference_profile"] = self.config["reference_profile"]["name"]
-                        provenance["reference_catalog"] = reference_catalog["metadata"]
+                        provenance["reference_catalog"] = provenance_metadata(reference_catalog["groups"])
                         if reference_catalog["warnings"]:
                             result["limitations"].append(f"登録URLの参照画像取得に関する注意: {len(reference_catalog['warnings'])}件")
                     if prepared["frames"] > 1:
@@ -220,7 +221,7 @@ class BatchEngine:
                 except Exception as exc:
                     if run_id is None:
                         key = digest({"asset_id": asset["id"], "config": self.config, "crop": asset["crop"], "preparation_error": str(exc)})
-                        run_id = self.store.begin(asset["id"], key, prepared["sha256"] if "prepared" in locals() else "", asset["crop"], self.config)
+                        run_id = self.store.begin(asset["id"], key, prepared["sha256"] if prepared else "", asset["crop"], self.config)
                     self.store.fail(run_id, exc)
                     counts["error"] += 1
                     if getattr(self.client, "_poisoned", False):
