@@ -519,7 +519,7 @@ class HttpTests(unittest.TestCase):
             config = build_config("fake", "digest")
             with self.assertRaises(OllamaError):
                 OllamaClient(server.url).structured(config, config["bundle"]["observation_schema"], "観察", "BASE64")
-            self.assertEqual(len(server.requests), 2)
+            self.assertEqual(len(server.requests), 4)
 
     def test_invalid_contract_retried_up_to_four_times(self):
         def handler(h, payload, fixture):
