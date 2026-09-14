@@ -212,8 +212,8 @@ class ReferenceSourceTests(unittest.TestCase):
         def fake_cache(image_url, page_url, _cache_dir, _allowed_hosts):
             return {"url": image_url, "page_url": page_url, "path": "ref.jpg", "sha256": "abc", "fetched_at": "2026-09-14T00:00:00+09:00"}
 
-        with patch("reference_sources._fetch", side_effect=fake_fetch), patch("reference_sources._cache_image", side_effect=fake_cache):
-            result = collect_reference_catalog({"name": "名探偵コナン", "urls": [index]}, self.root / "cache")
+        with tempfile.TemporaryDirectory() as temp, patch("reference_sources._fetch", side_effect=fake_fetch), patch("reference_sources._cache_image", side_effect=fake_cache):
+            result = collect_reference_catalog({"name": "名探偵コナン", "urls": [index]}, Path(temp) / "cache")
 
         self.assertEqual(len(result["groups"]), 1)
         self.assertEqual(result["groups"][0]["name"], "江戸川コナン")
