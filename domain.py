@@ -129,12 +129,12 @@ def validate_weights(weights: dict) -> dict:
     return result
 
 
-def score_result(result: dict, weights=None) -> dict:
+def score_result(result: dict, weights=None, reference_basis=None) -> dict:
     """Scores are feature ratings, never probabilities; missing evidence remains unknown."""
     result = json.loads(dumps(result))
     # A reference-free run must never claim that an official reference was inspected.
     narrative = dumps(result)
-    if re.search(r"(?:公式|参照)(?:の)?画像(?:と比較|では|の(?:髪|顔|傷|衣装|色|背景|ドレス|王冠)|で確認)", narrative):
+    if reference_basis is None and re.search(r"(?:公式|参照)(?:の)?画像(?:と比較|では|の(?:髪|顔|傷|衣装|色|背景|ドレス|王冠)|で確認)", narrative):
         raise ValidationError("提供されていない公式画像を比較したという説明が含まれています。")
     weights = validate_weights(weights or WEIGHTS)
     minimum_coverage = math.ceil(sum(weights.values()) / 2)
@@ -174,19 +174,19 @@ def score_result(result: dict, weights=None) -> dict:
         result["limitations"].append(f"重複した候補{duplicate_count}件を統合しました。")
     result["scoring_version"] = "features-v2"
     result["weights"] = weights
-    result["reference_basis"] = "モデルが学習したキャラクター像。公式画像との照合なし。"
+    result["reference_basis"] = reference_basis or "モデルが学習したキャラクター像。公式画像との照合なし。"
     return result
 
 
-def prepare_image(path: Path, max_edge: int = 1280, crop: list | None = None) -> dict:
-    if path.stat().st_size > 100 * 1024 * 1024:
+def prepare_image(path: Path, max_edge: int = 1280, crop: list | None = None, enforce_limits: bool = True) -> dict:
+    if enforce_limits and path.stat().st_size > 100 * 1024 * 1024:
         raise ValueError("画像が100MBを超えています。小さいコピーを選択してください。")
     raw = path.read_bytes()
-    if len(raw) > 100 * 1024 * 1024:
+    if enforce_limits and len(raw) > 100 * 1024 * 1024:
         raise ValueError("画像が100MBを超えています。小さいコピーを選択してください。")
     fingerprint = hashlib.sha256(raw).hexdigest()
     with Image.open(io.BytesIO(raw)) as source:
-        if source.width * source.height > 50_000_000:
+        if enforce_limits and source.width * source.height > 50_000_000:
             raise ValueError("画像が5000万画素を超えています。小さいコピーを選択してください。")
         frames = getattr(source, "n_frames", 1)
         source.seek(0)
@@ -228,5 +228,5 @@ def build_config(model: str, model_digest: str, mode="discover", target="", max_
         raise ValueError("判定モードが不正です。")
     if mode == "target" and not target.strip():
         raise ValueError("指定するキャラクター名を入力してください。")
-    return {"app_version": VERSION, "model": model, "model_digest": model_digest, "mode": mode, "target": target.strip() if mode == "target" else "", "max_edge": int(max_edge), "timeout": int(timeout), "num_ctx": 32768, "num_predict": 12000, "temperature": 0, "seed": 42, "bundle": contract_bundle(), "weights": validate_weights(weights or WEIGHTS)}
+    return {"app_version": VERSION, "model": model, "model_digest": model_digest, "mode": mode, "target": target.strip() if mode == "target" else "", "max_edge": int(max_edge), "timeout": int(timeout), "num_ctx": 32768, "num_predict": 12000, "temperature": 0, "seed": 42, "reference_mode": "local", "reference_profile": None, "reference_catalog": [], "bundle": contract_bundle(), "weights": validate_weights(weights or WEIGHTS)}
 
