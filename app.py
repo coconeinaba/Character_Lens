@@ -46,6 +46,7 @@ from ollama_client import OllamaClient
 from storage import Store
 from settings import load_settings, save_settings as save_file_settings
 from tagger import availability as tagger_availability, signature as tagger_signature
+from reference_sources import ReferenceError, normalize_profiles, validate_reference_url
 
 BG = "#edf2f7"
 INK = "#18304b"
@@ -218,6 +219,15 @@ class CharacterLens(tk.Tk):
         self.force = tk.BooleanVar(value=False)
         ready, _ = tagger_availability()
         self.use_tagger = tk.BooleanVar(value=saved.get("use_tagger", ready) and ready)
+        try:
+            self.reference_profiles = normalize_profiles(self.store.get_setting("reference_profiles", []))
+        except ReferenceError:
+            self.reference_profiles = []
+        active_reference = saved.get("reference_profile", "")
+        if active_reference not in {profile["name"] for profile in self.reference_profiles}:
+            active_reference = self.reference_profiles[0]["name"] if self.reference_profiles else ""
+        self.reference_mode = tk.StringVar(value=saved.get("reference_mode", "ローカルのみ"))
+        self.reference_profile = tk.StringVar(value=active_reference)
         self.connection_text = tk.StringVar(value="Ollamaを確認しています…")
         self.status = tk.StringVar(value="画像を追加して、解析を開始してください。")
         self.summary = tk.StringVar()
@@ -264,7 +274,20 @@ class CharacterLens(tk.Tk):
         ttk.Label(modebar, text="応答が止まった場合の上限秒").pack(side="left", padx=(12, 4))
         self._lock(ttk.Combobox(modebar, textvariable=self.timeout, values=[120, 300, 600, 900], width=6, state="readonly"), "readonly").pack(side="left")
         self._lock(ttk.Checkbutton(modebar, text="専用モデルで候補を絞る", variable=self.use_tagger)).pack(side="left", padx=12)
+        referencebar = ttk.Frame(self, padding=(16, 0, 16, 8))
+        referencebar.pack(fill="x")
+        ttk.Label(referencebar, text="参照画像").pack(side="left")
+        reference_mode_combo = self._lock(ttk.Combobox(referencebar, textvariable=self.reference_mode, values=["ローカルのみ", "登録URLのみ"], width=14, state="readonly"), "readonly")
+        reference_mode_combo.pack(side="left", padx=6)
+        reference_mode_combo.bind("<<ComboboxSelected>>", lambda _e: self.update_reference_state())
+        ttk.Label(referencebar, text="URLリスト").pack(side="left", padx=(10, 4))
+        self.reference_profile_combo = self._lock(ttk.Combobox(referencebar, textvariable=self.reference_profile, values=[profile["name"] for profile in self.reference_profiles], width=24, state="readonly"), "readonly")
+        self.reference_profile_combo.pack(side="left")
+        self.reference_profile_combo.bind("<<ComboboxSelected>>", lambda _e: self.save_settings())
+        self._lock(ttk.Button(referencebar, text="URLリストを管理", command=self.manage_reference_profiles)).pack(side="left", padx=8)
+        ttk.Label(referencebar, text="登録したURLとページ内画像だけを参照します。自由検索は行いません。", foreground=MUTED).pack(side="left", padx=6)
         self.update_target_state()
+        self.update_reference_state()
         weight_frame = ttk.LabelFrame(self, text="似ている度の重み（0〜100。未確認の軸は点数に含めません）", padding=(16, 5))
         weight_frame.pack(fill="x", padx=16, pady=(0, 7))
         for column, (key, label) in enumerate(AXES.items()):
@@ -276,7 +299,7 @@ class CharacterLens(tk.Tk):
             ttk.Label(group, textvariable=self.weight_text[key], width=3).pack(side="left")
             weight_frame.columnconfigure(column, weight=1)
         self._lock(ttk.Button(weight_frame, text="標準に戻す", command=self.reset_weights)).grid(row=0, column=len(AXES), padx=7)
-        notice = tk.Label(self, text="公式画像との照合は行いません。点数はモデルの知識に基づく推定で、正答確率・公式画像との一致率ではありません。", anchor="w", bg="#fff3dd", fg="#805623", padx=16, pady=8, font=("Yu Gothic UI", 9))
+        notice = tk.Label(self, text="通常はローカルAIの知識だけで判定します。登録URLのみ参照を選んだ場合は、保存済みURLとページ内画像を判断材料にします。自由なWeb検索は行いません。", anchor="w", bg="#fff3dd", fg="#805623", padx=16, pady=8, font=("Yu Gothic UI", 9))
         notice.pack(fill="x")
         toolbar = ttk.Frame(self, padding=(16, 10))
         toolbar.pack(fill="x")
@@ -388,8 +411,115 @@ class CharacterLens(tk.Tk):
     def update_target_state(self):
         self.target_entry.configure(state="normal" if not self.busy and self.mode.get() != "自由判定" else "disabled")
 
+    def update_reference_state(self):
+        state = "readonly" if not self.busy and self.reference_mode.get() == "登録URLのみ" and self.reference_profiles else "disabled"
+        self.reference_profile_combo.configure(state=state)
+
+    def _refresh_reference_profiles(self):
+        self.reference_profile_combo.configure(values=[profile["name"] for profile in self.reference_profiles])
+        if self.reference_profiles and self.reference_profile.get() not in {profile["name"] for profile in self.reference_profiles}:
+            self.reference_profile.set(self.reference_profiles[0]["name"])
+        if not self.reference_profiles:
+            self.reference_profile.set("")
+        self.update_reference_state()
+
+    def manage_reference_profiles(self):
+        if self.busy:
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("登録URLリストを管理")
+        dialog.geometry("720x480")
+        dialog.transient(self)
+        dialog.grab_set()
+        working = [{"name": profile["name"], "urls": list(profile["urls"])} for profile in self.reference_profiles]
+        selected = {"index": 0 if working else None}
+        name_var = tk.StringVar()
+        ttk.Label(dialog, text="登録URLだけを参照するプロファイルを保存します。Web検索は行いません。", padding=12, wraplength=680).pack(anchor="w")
+        form = ttk.Frame(dialog, padding=(12, 0))
+        form.pack(fill="x")
+        ttk.Label(form, text="プロファイル").grid(row=0, column=0, sticky="w")
+        profile_combo = ttk.Combobox(form, values=[profile["name"] for profile in working], state="readonly", width=28)
+        profile_combo.grid(row=0, column=1, sticky="w", padx=8)
+        ttk.Label(form, text="名前").grid(row=1, column=0, sticky="w", pady=8)
+        ttk.Entry(form, textvariable=name_var, width=32).grid(row=1, column=1, sticky="w", padx=8)
+        ttk.Label(dialog, text="URL（1行に1件。HTTPSのみ）", padding=(12, 8, 12, 2)).pack(anchor="w")
+        urls_text = tk.Text(dialog, height=14, wrap="none")
+        urls_text.pack(fill="both", expand=True, padx=12)
+        buttons = ttk.Frame(dialog, padding=12)
+        buttons.pack(fill="x")
+
+        def load_profile(index):
+            selected["index"] = index
+            profile_combo.set(working[index]["name"])
+            name_var.set(working[index]["name"])
+            urls_text.delete("1.0", "end")
+            urls_text.insert("1.0", "\n".join(working[index]["urls"]))
+
+        def clear_form():
+            selected["index"] = None
+            profile_combo.set("")
+            name_var.set("")
+            urls_text.delete("1.0", "end")
+
+        def save_current():
+            name = name_var.get().strip()
+            raw_urls = [line.strip() for line in urls_text.get("1.0", "end").splitlines() if line.strip()]
+            try:
+                urls = []
+                for url in raw_urls:
+                    normalized = validate_reference_url(url)
+                    if normalized not in urls:
+                        urls.append(normalized)
+                if not name or not urls:
+                    raise ReferenceError("プロファイル名とURLを入力してください。")
+                for index, profile in enumerate(working):
+                    if index != selected["index"] and profile["name"] == name:
+                        raise ReferenceError("同じ名前のプロファイルがすでにあります。")
+                value = {"name": name, "urls": urls}
+                if selected["index"] is None:
+                    working.append(value)
+                    selected["index"] = len(working) - 1
+                else:
+                    working[selected["index"]] = value
+                self.reference_profiles = normalize_profiles(working)
+                self.store.set_setting("reference_profiles", self.reference_profiles)
+                self.reference_profile.set(name)
+                self._refresh_reference_profiles()
+                self.save_settings()
+                profile_combo.configure(values=[profile["name"] for profile in working])
+                load_profile(selected["index"])
+                self.status.set("登録URLリストを保存しました。")
+            except ReferenceError as exc:
+                messagebox.showerror("URLリスト", str(exc), parent=dialog)
+
+        def delete_current():
+            index = selected["index"]
+            if index is None:
+                return
+            if not messagebox.askyesno("URLリストを削除", f"「{working[index]['name']}」を削除しますか？", parent=dialog):
+                return
+            working.pop(index)
+            self.reference_profiles = normalize_profiles(working) if working else []
+            self.store.set_setting("reference_profiles", self.reference_profiles)
+            self._refresh_reference_profiles()
+            self.save_settings()
+            if working:
+                load_profile(max(0, index - 1))
+            else:
+                clear_form()
+
+        ttk.Button(buttons, text="新規", command=clear_form).pack(side="left")
+        ttk.Button(buttons, text="保存", command=save_current).pack(side="left", padx=6)
+        ttk.Button(buttons, text="削除", command=delete_current).pack(side="left")
+        ttk.Button(buttons, text="閉じる", command=dialog.destroy).pack(side="right")
+        profile_combo.bind("<<ComboboxSelected>>", lambda _e: load_profile(profile_combo.current()))
+        if working:
+            load_profile(0)
+        else:
+            clear_form()
+
     def save_settings(self):
-        self.store.set_setting("ui", {"endpoint": self.endpoint.get(), "model": self.model.get(), "mode": self.mode.get(), "target": self.target.get(), "edge": self.edge.get(), "timeout": self.timeout.get(), "use_tagger": self.use_tagger.get()})
+        self.store.set_setting("ui", {"endpoint": self.endpoint.get(), "model": self.model.get(), "mode": self.mode.get(), "target": self.target.get(), "edge": self.edge.get(), "timeout": self.timeout.get(), "use_tagger": self.use_tagger.get(), "reference_mode": self.reference_mode.get(), "reference_profile": self.reference_profile.get()})
         save_file_settings({"ollama_profiles": self.profiles, "active_profile": self.profile.get(), "weights": {key: var.get() for key, var in self.weight_vars.items()}})
 
     def select_profile(self):
