@@ -117,7 +117,8 @@
           "display_name"
         ],
         "additionalProperties": false
-      },},
+      }
+    },
     "limitations": {
       "type": "array",
       "items": {
