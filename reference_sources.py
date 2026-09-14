@@ -259,6 +259,25 @@ def _metadata(catalog):
     return groups
 
 
+def provenance_metadata(catalog):
+    """Return export-safe reference metadata including retrieval timestamps."""
+    groups = []
+    for group in catalog or []:
+        groups.append({
+            "name": group["name"],
+            "display_name": group["display_name"],
+            "work": group["work"],
+            "page_url": group["page_url"],
+            "images": [{
+                "url": item["url"],
+                "page_url": item["page_url"],
+                "sha256": item["sha256"],
+                "fetched_at": item.get("fetched_at"),
+            } for item in group["images"]],
+        })
+    return groups
+
+
 def normalize_profiles(value):
     if value is None:
         return []
