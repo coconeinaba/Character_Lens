@@ -932,7 +932,13 @@ class CharacterLens(tk.Tk):
         try:
             OllamaClient(self.endpoint.get())
             config = build_config(model["name"], model["digest"], "discover" if self.mode.get() == "自由判定" else "target", self.target.get(), int(self.edge.get()), int(self.timeout.get()), {key: var.get() for key, var in self.weight_vars.items()})
-            if self.use_tagger.get():
+            if self.reference_mode.get() == "登録URLのみ":
+                profile = next((item for item in self.reference_profiles if item["name"] == self.reference_profile.get()), None)
+                if not profile:
+                    raise ValueError("登録URLのみ参照を使う場合は、URLリストを保存して選択してください。")
+                config["reference_mode"] = "registered_urls"
+                config["reference_profile"] = {"name": profile["name"], "urls": list(profile["urls"])}
+            elif self.use_tagger.get():
                 ready, reason = tagger_availability()
                 if not ready:
                     raise ValueError(reason + "。README.mdの準備手順を確認するか、専用モデルのチェックを外してください。")
