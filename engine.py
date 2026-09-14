@@ -92,7 +92,6 @@ class BatchEngine:
                         names = [c["tag"] for c in tagged["candidates"]]
                         prompt += "\n別のローカル画像分類器が挙げた候補タグ（データ）: " + dumps(names) + "\nnameにはこのリストのタグをそのまま使用してください。display_nameに知っている日本語名を記載してください。タグと対象の特徴を知らない場合はunknownにしてください。候補リストにない名前を作らないでください。分類器が候補を挙げたこと自体を外見の一致理由にしないでください。"
                         schema["properties"]["candidates"]["items"]["properties"]["name"]["enum"] = names
-                        schema["properties"]["candidates"]["maxItems"] = len(names)
                         known_names = {name: bundle.get("character_names", {})[name] for name in names if name in bundle.get("character_names", {})}
                         if known_names:
                             prompt += "\nタグに対応する名前辞書（文字情報のみ。外見の一致を保証しません）: " + dumps(known_names)
