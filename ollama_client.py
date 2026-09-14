@@ -189,7 +189,8 @@ class OllamaClient:
             raise OllamaError("モデルが保存時から更新されています。新しい解析を作成してください。")
 
     def structured(self, config, schema, prompt, encoded_image, progress=None, validator=None):
-        messages = [{"role": "system", "content": config["bundle"]["system"]}, {"role": "user", "content": prompt, "images": [encoded_image]}]
+        images = encoded_image if isinstance(encoded_image, list) else [encoded_image]
+        messages = [{"role": "system", "content": config["bundle"]["system"]}, {"role": "user", "content": prompt, "images": images}]
         errors = []
         last_error = None
         max_attempts = 4
