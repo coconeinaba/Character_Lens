@@ -16,6 +16,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image
 from domain import AXES, ValidationError, build_config, contract_bundle, parse_reply, prepare_image, score_result, validate_weights
+from reference_sources import ReferenceError, collect_reference_catalog, normalize_profiles, provenance_metadata, validate_reference_url
 from settings import load_settings, save_settings
 from engine import BatchEngine
 from exporter import export_csv, export_html, export_json, spreadsheet_text
@@ -92,6 +93,24 @@ class DomainTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             score_result(data)
 
+    def test_duplicate_candidates_are_collapsed(self):
+        data = answer()
+        data["candidates"] *= 2
+        result = score_result(data)
+        self.assertEqual(len(result["candidates"]), 1)
+        self.assertIn("重複した候補", result["limitations"][-1])
+
+    def test_candidate_list_has_no_artificial_limit(self):
+        schema = copy.deepcopy(self.schema)
+        self.assertNotIn("maxItems", schema["properties"]["candidates"])
+        data = answer()
+        data["candidates"] = []
+        for index in range(6):
+            candidate = copy.deepcopy(answer(f"候補{index}")["candidates"][0])
+            candidate["work"] = f"作品{index}"
+            data["candidates"].append(candidate)
+        self.assertEqual(len(parse_reply(json.dumps(data), schema)["candidates"]), 6)
+
     def test_unknown_with_candidate_rejected(self):
         data = answer()
         data["identification"] = "unknown"
@@ -154,6 +173,53 @@ class DomainTests(unittest.TestCase):
             saved = save_settings({"weights": weights, "ollama_profiles": [{"name": "LAN", "endpoint": "http://192.168.1.2:11434"}], "active_profile": "LAN"}, path)
             self.assertEqual(saved["weights"], weights)
             self.assertEqual(load_settings(path)["ollama_profiles"][0]["endpoint"], "http://192.168.1.2:11434")
+
+
+class ReferenceSourceTests(unittest.TestCase):
+    def test_registered_url_validation_and_profiles(self):
+        self.assertEqual(
+            validate_reference_url("https://Example.com/characters/#top"),
+            "https://example.com/characters/",
+        )
+        with self.assertRaises(ReferenceError):
+            validate_reference_url("http://example.com/characters/")
+        with self.assertRaises(ReferenceError):
+            validate_reference_url("https://user:password@example.com/characters/")
+        with self.assertRaises(ReferenceError):
+            validate_reference_url("https://127.0.0.1/characters/")
+        with self.assertRaises(ReferenceError):
+            validate_reference_url("https://other.example/characters/", {"example.com"})
+        profiles = normalize_profiles([{
+            "name": "公式キャラクター",
+            "urls": ["https://example.com/characters/", "https://example.com/characters/#ignored"],
+        }])
+        self.assertEqual(profiles, [{
+            "name": "公式キャラクター",
+            "urls": ["https://example.com/characters/"],
+        }])
+
+    def test_character_page_name_is_mapped_to_its_images(self):
+        index = "https://example.com/characters/"
+        child = "https://example.com/characters/conan/"
+        payloads = {
+            index: {"url": index, "content_type": "text/html", "charset": "utf-8", "data": "<h1>キャラクター</h1><a href='/characters/conan/'>江戸川コナン</a>".encode()},
+            child: {"url": child, "content_type": "text/html", "charset": "utf-8", "data": "<title>江戸川コナン | 名探偵コナン</title><h1>江戸川コナン</h1><img src='/images/conan.jpg'>".encode()},
+        }
+
+        def fake_fetch(url, _allowed_hosts):
+            return payloads[url]
+
+        def fake_cache(image_url, page_url, _cache_dir, _allowed_hosts):
+            return {"url": image_url, "page_url": page_url, "path": "ref.jpg", "sha256": "abc", "fetched_at": "2026-09-14T00:00:00+09:00"}
+
+        with tempfile.TemporaryDirectory() as temp, patch("reference_sources._fetch", side_effect=fake_fetch), patch("reference_sources._cache_image", side_effect=fake_cache):
+            result = collect_reference_catalog({"name": "名探偵コナン", "urls": [index]}, Path(temp) / "cache")
+
+        self.assertEqual(len(result["groups"]), 1)
+        self.assertEqual(result["groups"][0]["name"], "江戸川コナン")
+        self.assertEqual(result["groups"][0]["work"], "名探偵コナン")
+        self.assertEqual(result["groups"][0]["images"][0]["url"], "https://example.com/images/conan.jpg")
+        self.assertEqual(provenance_metadata(result["groups"])[0]["images"][0]["fetched_at"], "2026-09-14T00:00:00+09:00")
 
 
 class ImageTests(unittest.TestCase):
@@ -252,14 +318,14 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(row["status"], "done")
         self.assertNotIn("accepted_character", self.client.calls[0][1])
         candidates_schema = self.client.schemas[1]["properties"]["candidates"]
-        self.assertEqual(candidates_schema["maxItems"], 1)
+        self.assertNotIn("maxItems", candidates_schema)
         self.assertEqual(candidates_schema["items"]["properties"]["name"]["enum"], ["accepted_character"])
         with self.assertRaises(ValidationError):
             parse_reply(json.dumps(answer("made_up_character")), self.client.schemas[1])
         duplicated = answer("accepted_character")
         duplicated["candidates"] *= 2
-        with self.assertRaises(ValidationError):
-            parse_reply(json.dumps(duplicated), self.client.schemas[1])
+        parsed = parse_reply(json.dumps(duplicated), self.client.schemas[1])
+        self.assertEqual(len(score_result(parsed)["candidates"]), 1)
 
     def test_tagger_does_not_block_explicit_target_evaluation(self):
         self.config["tagger"] = {"threshold": 0.85}
@@ -501,16 +567,30 @@ class HttpTests(unittest.TestCase):
             config = build_config("fake", "digest")
             with self.assertRaises(OllamaError):
                 OllamaClient(server.url).structured(config, config["bundle"]["observation_schema"], "観察", "BASE64")
-            self.assertEqual(len(server.requests), 2)
+            self.assertEqual(len(server.requests), 4)
 
-    def test_invalid_contract_retried_only_once(self):
+    def test_invalid_contract_retried_up_to_four_times(self):
         def handler(h, payload, fixture):
             stream(h, [{"message": {"content": "{}"}, "done": True}])
         with ServerFixture(handler) as server:
             config = build_config("fake", "digest")
             with self.assertRaises(OllamaError):
                 OllamaClient(server.url).structured(config, config["bundle"]["observation_schema"], "観察", "BASE64")
-            self.assertEqual(len(server.requests), 2)
+            self.assertEqual(len(server.requests), 4)
+
+    def test_length_terminated_stream_retries_with_larger_output_budget(self):
+        def handler(h, payload, fixture):
+            if len(fixture.requests) == 1:
+                stream(h, [{"message": {"content": "{}"}, "done": True, "done_reason": "length"}])
+            else:
+                text = json.dumps(observation(), ensure_ascii=False)
+                stream(h, [{"message": {"content": text}, "done": True, "done_reason": "stop"}])
+        with ServerFixture(handler) as server:
+            config = build_config("fake", "digest")
+            result, metrics = OllamaClient(server.url).structured(config, config["bundle"]["observation_schema"], "観察", "BASE64")
+            self.assertEqual(result, observation())
+            self.assertEqual(metrics["attempts"], 2)
+            self.assertLess(server.requests[0][1]["options"]["num_predict"], server.requests[1][1]["options"]["num_predict"])
 
     def test_truncated_and_length_terminated_streams_rejected(self):
         for reason in ("missing_done", "length"):

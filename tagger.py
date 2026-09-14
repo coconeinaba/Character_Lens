@@ -27,7 +27,7 @@ def availability():
 
 def signature():
     manifest = json.loads((MODEL_DIR / "manifest.json").read_text(encoding="utf-8"))
-    return {"repo": REPO, "revision": manifest["revision"], "files": {name: value["sha256"] for name, value in manifest["files"].items() if name in ("model.onnx", "selected_tags.csv")}, "threshold": 0.85, "max_candidates": 3, "preprocessing": "square-white-bgr-bicubic-v1"}
+    return {"repo": REPO, "revision": manifest["revision"], "files": {name: value["sha256"] for name, value in manifest["files"].items() if name in ("model.onnx", "selected_tags.csv")}, "threshold": 0.85, "preprocessing": "square-white-bgr-bicubic-v1"}
 
 
 class CharacterTagger:
@@ -63,6 +63,6 @@ class CharacterTagger:
             raise ValueError("専用モデルとタグ一覧の要素数が一致しません。")
         scores = [{"tag": row["name"], "score": round(float(values[i]), 6)} for i, row in enumerate(self.labels) if row["category"] == "4"]
         scores.sort(key=lambda item: item["score"], reverse=True)
-        selected = [r for r in scores if r["score"] >= self.expected["threshold"]][:self.expected["max_candidates"]]
+        selected = [r for r in scores if r["score"] >= self.expected["threshold"]]
         return {"model": REPO, "candidates": selected, "top_below_threshold": scores[:3] if not selected else [], "threshold": self.expected["threshold"], "note": "スコアは分類器の出力です。見た目の類似度・校正済み確率ではありません。対応タグがないキャラクターは検出できません。"}
 

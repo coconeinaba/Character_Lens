@@ -12,7 +12,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 ROOT = Path(__file__).resolve().parent
 AXES = {"hair": "髪", "face": "顔・目", "costume": "衣装", "distinctive": "固有の目印", "colors": "配色", "body": "体形・種族的特徴"}
 WEIGHTS = {"hair": 20, "face": 20, "costume": 15, "distinctive": 30, "colors": 5, "body": 10}
@@ -87,7 +87,7 @@ def validate_schema(value, schema: dict, path: str = "$", depth: int = 0) -> Non
         for key in value.keys() & props.keys():
             validate_schema(value[key], props[key], f"{path}.{key}", depth + 1)
     elif kind == "array":
-        if not schema.get("minItems", 0) <= len(value) <= schema.get("maxItems", 1000):
+        if len(value) < schema.get("minItems", 0) or ("maxItems" in schema and len(value) > schema["maxItems"]):
             raise ValidationError(f"{path}: 要素数が範囲外です。")
         for i, item in enumerate(value):
             validate_schema(item, schema["items"], f"{path}[{i}]", depth + 1)
@@ -129,12 +129,12 @@ def validate_weights(weights: dict) -> dict:
     return result
 
 
-def score_result(result: dict, weights=None) -> dict:
+def score_result(result: dict, weights=None, reference_basis=None) -> dict:
     """Scores are feature ratings, never probabilities; missing evidence remains unknown."""
     result = json.loads(dumps(result))
     # A reference-free run must never claim that an official reference was inspected.
     narrative = dumps(result)
-    if re.search(r"(?:公式|参照)(?:の)?画像(?:と比較|では|の(?:髪|顔|傷|衣装|色|背景|ドレス|王冠)|で確認)", narrative):
+    if reference_basis is None and re.search(r"(?:公式|参照)(?:の)?画像(?:と比較|では|の(?:髪|顔|傷|衣装|色|背景|ドレス|王冠)|で確認)", narrative):
         raise ValidationError("提供されていない公式画像を比較したという説明が含まれています。")
     weights = validate_weights(weights or WEIGHTS)
     minimum_coverage = math.ceil(sum(weights.values()) / 2)
@@ -143,15 +143,18 @@ def score_result(result: dict, weights=None) -> dict:
         raise ValidationError("特定困難・人物なしの結果に候補が含まれています。")
     if result["identification"] in ("candidate", "ambiguous") and not candidates:
         raise ValidationError("候補ありの結果に候補がありません。")
+    unique_candidates = []
     names = set()
-    for candidate in candidates:
+    duplicate_count = 0
+    for candidate in result["candidates"]:
         if not candidate["name"].strip():
             raise ValidationError("キャラクター名が空です。")
         if candidate["work"].strip().casefold() in ("", "不明", "未知", "unknown", "不詳", "不確か"):
             raise ValidationError("出典作品を挙げられない候補があります。知識不足の場合はunknownにしてください。")
         key = (candidate["name"].casefold().strip(), candidate["work"].casefold().strip())
         if key in names:
-            raise ValidationError("同じ候補が重複しています。")
+            duplicate_count += 1
+            continue
         names.add(key)
         axes = candidate["axes"]
         if {a["axis"] for a in axes} != set(AXES) or len(axes) != len(AXES):
@@ -165,21 +168,25 @@ def score_result(result: dict, weights=None) -> dict:
         candidate["coverage"] = round(total * 100 / sum(weights.values()))
         candidate["estimated_similarity"] = int(weighted / total + 0.5) if total >= minimum_coverage else None
         candidate["score_note"] = "暫定の特徴評価。公式画像との実測値・正答確率ではありません。"
+        unique_candidates.append(candidate)
+    result["candidates"] = unique_candidates
+    if duplicate_count and len(result["limitations"]) < 12:
+        result["limitations"].append(f"重複した候補{duplicate_count}件を統合しました。")
     result["scoring_version"] = "features-v2"
     result["weights"] = weights
-    result["reference_basis"] = "モデルが学習したキャラクター像。公式画像との照合なし。"
+    result["reference_basis"] = reference_basis or "モデルが学習したキャラクター像。公式画像との照合なし。"
     return result
 
 
-def prepare_image(path: Path, max_edge: int = 1280, crop: list | None = None) -> dict:
-    if path.stat().st_size > 100 * 1024 * 1024:
+def prepare_image(path: Path, max_edge: int = 1280, crop: list | None = None, enforce_limits: bool = True) -> dict:
+    if enforce_limits and path.stat().st_size > 100 * 1024 * 1024:
         raise ValueError("画像が100MBを超えています。小さいコピーを選択してください。")
     raw = path.read_bytes()
-    if len(raw) > 100 * 1024 * 1024:
+    if enforce_limits and len(raw) > 100 * 1024 * 1024:
         raise ValueError("画像が100MBを超えています。小さいコピーを選択してください。")
     fingerprint = hashlib.sha256(raw).hexdigest()
     with Image.open(io.BytesIO(raw)) as source:
-        if source.width * source.height > 50_000_000:
+        if enforce_limits and source.width * source.height > 50_000_000:
             raise ValueError("画像が5000万画素を超えています。小さいコピーを選択してください。")
         frames = getattr(source, "n_frames", 1)
         source.seek(0)
@@ -221,5 +228,5 @@ def build_config(model: str, model_digest: str, mode="discover", target="", max_
         raise ValueError("判定モードが不正です。")
     if mode == "target" and not target.strip():
         raise ValueError("指定するキャラクター名を入力してください。")
-    return {"app_version": VERSION, "model": model, "model_digest": model_digest, "mode": mode, "target": target.strip() if mode == "target" else "", "max_edge": int(max_edge), "timeout": int(timeout), "num_ctx": 16384, "num_predict": 5500, "temperature": 0, "seed": 42, "bundle": contract_bundle(), "weights": validate_weights(weights or WEIGHTS)}
+    return {"app_version": VERSION, "model": model, "model_digest": model_digest, "mode": mode, "target": target.strip() if mode == "target" else "", "max_edge": int(max_edge), "timeout": int(timeout), "num_ctx": 32768, "num_predict": 12000, "temperature": 0, "seed": 42, "reference_mode": "local", "reference_profile": None, "reference_catalog": [], "bundle": contract_bundle(), "weights": validate_weights(weights or WEIGHTS)}
 

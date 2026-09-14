@@ -117,8 +117,7 @@
           "display_name"
         ],
         "additionalProperties": false
-      },
-      "maxItems": 3
+      }
     },
     "limitations": {
       "type": "array",

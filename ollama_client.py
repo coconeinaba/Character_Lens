@@ -21,6 +21,11 @@ class OllamaError(RuntimeError):
     pass
 
 
+class OutputLengthError(OllamaError):
+    """The model stopped because the generation limit was reached."""
+    pass
+
+
 def local_endpoint(url: str) -> tuple[str, int]:
     try:
         parsed = urlsplit(url.strip())
@@ -134,8 +139,8 @@ class OllamaClient:
                 chunks.append(content)
                 thinking_chunks.append(thinking)
                 chars += len(content) + len(thinking)
-                if chars > 250_000:
-                    raise OllamaError("出力が上限を超えました。プロンプトやモデルを見直してください。")
+                if chars > 1_000_000:
+                    raise OllamaError("出力が安全上限を超えました。候補数や説明を短くして再実行してください。")
                 current = time.monotonic()
                 if progress and current - last_progress >= 0.4:
                     progress(chars, current - started)
@@ -147,7 +152,7 @@ class OllamaClient:
             if not done:
                 raise OllamaError("応答が途中で切れました。未完成の結果は採用しません。")
             if done.get("done_reason") == "length":
-                raise OllamaError("出力が長さ上限で終了しました。候補・説明を短くするか出力上限を増やしてください。")
+                raise OutputLengthError("出力が長さ上限で終了しました。")
             return {"text": "".join(chunks), "alternate_text": "".join(thinking_chunks), "metrics": {k: done.get(k) for k in ("done_reason", "total_duration", "load_duration", "prompt_eval_count", "eval_count")}}
         except (OSError, ValueError, http.client.HTTPException) as exc:
             self._check_cancel()
@@ -184,15 +189,33 @@ class OllamaClient:
             raise OllamaError("モデルが保存時から更新されています。新しい解析を作成してください。")
 
     def structured(self, config, schema, prompt, encoded_image, progress=None, validator=None):
-        messages = [{"role": "system", "content": config["bundle"]["system"]}, {"role": "user", "content": prompt, "images": [encoded_image]}]
+        images = encoded_image if isinstance(encoded_image, list) else [encoded_image]
+        messages = [{"role": "system", "content": config["bundle"]["system"]}, {"role": "user", "content": prompt, "images": images}]
         errors = []
-        for attempt in range(2):
+        last_error = None
+        max_attempts = 4
+        for attempt in range(max_attempts):
             self._check_cancel()
             request_messages = [dict(m) for m in messages]
             if attempt:
-                request_messages[-1]["content"] += "\n前回の回答は形式検査に失敗しました。説明文やMarkdownを付けず、Schemaの型・必須項目を守り、評価軸は6種類を重複なく出力してください。"
-            payload = {"model": config["model"], "messages": request_messages, "format": schema, "stream": True, "think": False, "keep_alive": "5m", "options": {"temperature": config["temperature"], "seed": config["seed"], "num_ctx": config["num_ctx"], "num_predict": config["num_predict"]}}
-            response = self.request("/api/chat", payload, config["timeout"], progress)
+                if isinstance(last_error, OutputLengthError):
+                    request_messages[-1]["content"] += "\n前回の回答は出力上限で途中終了しました。画像内で見える各キャラクターを省略せず、各説明・理由を短くして、指定SchemaのJSONを最後まで出力してください。"
+                else:
+                    request_messages[-1]["content"] += "\n前回の回答は形式検査に失敗しました。説明文やMarkdownを付けず、Schemaの型・必須項目を守り、評価軸は6種類を重複なく出力してください。同じキャラクターは1件にまとめてください。"
+            base_context = max(1024, int(config.get("num_ctx", 32768)))
+            base_predict = int(config.get("num_predict", 12000))
+            if base_predict < 0:
+                num_predict = base_predict
+            else:
+                num_predict = min(32768, max(1, base_predict) * (2 ** attempt))
+            num_ctx = min(65536, max(base_context, num_predict + 4096 if num_predict > 0 else base_context))
+            payload = {"model": config["model"], "messages": request_messages, "format": schema, "stream": True, "think": False, "keep_alive": "5m", "options": {"temperature": config["temperature"], "seed": config["seed"], "num_ctx": num_ctx, "num_predict": num_predict}}
+            try:
+                response = self.request("/api/chat", payload, config["timeout"], progress)
+            except OutputLengthError as exc:
+                last_error = exc
+                errors.append(str(exc))
+                continue
             try:
                 source = "content"
                 reply = response["text"]
@@ -207,6 +230,8 @@ class OllamaClient:
                     result = validator(result)
                 return result, {"attempts": attempt + 1, "response_field": source, **response["metrics"]}
             except ValidationError as exc:
+                last_error = exc
                 errors.append(str(exc))
-        raise OllamaError("回答が形式検査に2回失敗しました: " + errors[-1])
-
+        if isinstance(last_error, OutputLengthError):
+            raise OllamaError("出力上限を拡張して4回試行しましたが、モデルが完成したJSONを返せませんでした。") from last_error
+        raise OllamaError(f"回答が形式検査に{max_attempts}回失敗しました: {errors[-1] if errors else '不明な検証エラー'}")
