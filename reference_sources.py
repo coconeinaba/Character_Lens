@@ -185,8 +185,10 @@ def _work_name(parser, fallback=""):
 
 def _is_index_page(url, parser):
     path = urlsplit(url).path.rstrip("/")
-    name = _page_name(parser)
-    return path.endswith("/character") or name.casefold() in GENERIC_HEADINGS
+    last_segment = path.rsplit("/", 1)[-1].casefold()
+    if last_segment in {"character", "characters", "キャラクター"}:
+        return True
+    return any(_clean(value).casefold() in GENERIC_HEADINGS for value in parser.headings)
 
 
 def _allowed_child(url, base_url, allowed_hosts):
