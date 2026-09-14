@@ -862,7 +862,7 @@ class CharacterLens(tk.Tk):
                 if result.get("limitations"):
                     text.insert("end", "判定の制約\n", "heading")
                     text.insert("end", "\n".join("・" + v for v in result["limitations"]) + "\n", "warning")
-                text.insert("end", "\n公式画像との照合なし。点数は暫定評価です。", "muted")
+                text.insert("end", "\n" + result.get("reference_basis", "モデルの知識だけによる暫定評価。"), "muted")
                 if result.get("tagger"):
                     text.insert("end", "\n専用モデルの判定\n", "heading")
                     tagged = result["tagger"]
@@ -884,6 +884,10 @@ class CharacterLens(tk.Tk):
             provenance = result.get("provenance") or {}
             obs.insert("end", "解析条件\n", "title")
             obs.insert("end", f"モデル: {config.get('model', '未設定')}\n判定: {'指定名あり' if config.get('mode') == 'target' else '自由判定'}\n指定名: {config.get('target', '')}\n解析時の範囲: {row.get('run_crop') or '画像全体'}\n処理時間: {provenance.get('seconds', '—')} 秒\n元画像SHA-256: {row.get('source_sha') or '未解析'}\n", "muted")
+            if provenance.get("reference_mode") == "registered_urls":
+                catalog = provenance.get("reference_catalog") or []
+                image_count = sum(len(group.get("images", [])) for group in catalog)
+                obs.insert("end", f"参照プロファイル: {provenance.get('reference_profile', '')}\n登録URLの参照画像: {image_count}枚（画像自体は結果に埋め込みません）\n", "muted")
             obs.insert("end", "\n範囲を変更した場合、過去の解析結果は以前の範囲に対する結果です。次回の解析で更新されます。\nモデル名・プロンプト・画像内容・範囲が同じ場合、保存済みの完了結果を再利用します。", "muted")
         for widget in (text, obs):
             widget.configure(state="disabled")
