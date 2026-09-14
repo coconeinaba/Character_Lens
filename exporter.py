@@ -75,7 +75,8 @@ def export_csv(rows, destination):
         result = row.get("result") or {}
         candidates = result.get("candidates") or [{}]
         for rank, candidate in enumerate(candidates, 1):
-            provenance = result.get("provenance") or {}\n            values = [Path(row["path"]).name, row["path"], STATUS_LABELS.get(row.get("status"), "未処理"), rank if candidate else "", candidate_label(candidate), candidate.get("work", ""), candidate.get("estimated_similarity"), candidate.get("coverage"), CONFIDENCE_LABELS.get(candidate.get("confidence"), ""), " / ".join(candidate.get("matches", [])), " / ".join(candidate.get("differences", [])), candidate.get("rationale", result.get("overall_reason", "")), (row.get("config") or {}).get("model", ""), provenance.get("reference_profile", ""), reference_urls(result), row.get("review_name"), "済" if row.get("reviewed") else "", row.get("review_note"), row.get("error")]
+            provenance = result.get("provenance") or {}
+            values = [Path(row["path"]).name, row["path"], STATUS_LABELS.get(row.get("status"), "未処理"), rank if candidate else "", candidate_label(candidate), candidate.get("work", ""), candidate.get("estimated_similarity"), candidate.get("coverage"), CONFIDENCE_LABELS.get(candidate.get("confidence"), ""), " / ".join(candidate.get("matches", [])), " / ".join(candidate.get("differences", [])), candidate.get("rationale", result.get("overall_reason", "")), (row.get("config") or {}).get("model", ""), provenance.get("reference_profile", ""), reference_urls(result), row.get("review_name"), "済" if row.get("reviewed") else "", row.get("review_note"), row.get("error")]
             writer.writerow([spreadsheet_text(value) for value in values + [tagger_summary(result)]])
     atomic_text(destination, output.getvalue(), "utf-8-sig")
 
