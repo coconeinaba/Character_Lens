@@ -16,7 +16,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image
 from domain import AXES, ValidationError, build_config, contract_bundle, parse_reply, prepare_image, score_result, validate_weights
-from reference_sources import ReferenceError, normalize_profiles, validate_reference_url
+from reference_sources import ReferenceError, collect_reference_catalog, normalize_profiles, provenance_metadata, validate_reference_url
 from settings import load_settings, save_settings
 from engine import BatchEngine
 from exporter import export_csv, export_html, export_json, spreadsheet_text
@@ -197,6 +197,29 @@ class ReferenceSourceTests(unittest.TestCase):
             "name": "公式キャラクター",
             "urls": ["https://example.com/characters/"],
         }])
+
+    def test_character_page_name_is_mapped_to_its_images(self):
+        index = "https://example.com/characters/"
+        child = "https://example.com/characters/conan/"
+        payloads = {
+            index: {"url": index, "content_type": "text/html", "charset": "utf-8", "data": "<h1>キャラクター</h1><a href='/characters/conan/'>江戸川コナン</a>".encode()},
+            child: {"url": child, "content_type": "text/html", "charset": "utf-8", "data": "<title>江戸川コナン | 名探偵コナン</title><h1>江戸川コナン</h1><img src='/images/conan.jpg'>".encode()},
+        }
+
+        def fake_fetch(url, _allowed_hosts):
+            return payloads[url]
+
+        def fake_cache(image_url, page_url, _cache_dir, _allowed_hosts):
+            return {"url": image_url, "page_url": page_url, "path": "ref.jpg", "sha256": "abc", "fetched_at": "2026-09-14T00:00:00+09:00"}
+
+        with patch("reference_sources._fetch", side_effect=fake_fetch), patch("reference_sources._cache_image", side_effect=fake_cache):
+            result = collect_reference_catalog({"name": "名探偵コナン", "urls": [index]}, self.root / "cache")
+
+        self.assertEqual(len(result["groups"]), 1)
+        self.assertEqual(result["groups"][0]["name"], "江戸川コナン")
+        self.assertEqual(result["groups"][0]["work"], "名探偵コナン")
+        self.assertEqual(result["groups"][0]["images"][0]["url"], "https://example.com/images/conan.jpg")
+        self.assertEqual(provenance_metadata(result["groups"])[0]["images"][0]["fetched_at"], "2026-09-14T00:00:00+09:00")
 
 
 class ImageTests(unittest.TestCase):
